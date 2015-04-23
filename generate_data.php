@@ -1,11 +1,15 @@
 
 <?
 
+
+
 function generate_data ($origins, $generations, $date_start, $date_end, $is_finfet, $verbose = '0') {
 
 global $table, $dbh_pat, $dbh_local;
 
-//Process the dates
+$is_finfet = 0;
+
+//Process the dates, PHP being stupid
 $start = explode("/", $date_start);
 $Y = $start[0];
 $M = $start[1];
@@ -22,7 +26,7 @@ $string = "$M/$D/$Y";
 $end_date = strtotime($string);
 $end_date = date('Y-m-d',$end_date); 
 
-//FinFET correction
+//This hacky solution to the applications table problem should still be somewhat smart
 if ($is_finfet == 1) {
 	$string = "10/23/2000"; //Date of finfet patent application
 	$compare = strtotime($string);
@@ -35,12 +39,12 @@ if ($is_finfet == 1) {
 		echo "Finfet correction negated, date before $compare<br><br>";
 		$is_finfet = 0;}
 }
-//End FinFET correction
+//End hacky solution
 
 $table = 'socialnetwork';
 
-mysql_select_db(/*REMOVED*/, $dbh_pat) or die("Could not select uspto");
-mysql_select_db(/*REMOVED*/, $dbh_local) or die("Could not select local");
+mysql_select_db("uspto", $dbh_pat) or die("Could not select uspto");
+mysql_select_db("wbtmougo_dblood", $dbh_local) or die("Could not select local");
 
 // -------------------------------------------------------------------
 // -------------------------------------------------------------------
@@ -88,22 +92,39 @@ function make_unique($array) {
 
 //This function takes an array of inventor ids and return all patent ids associated
 function patents_by_inventors($array) {
-	global $date_start, $date_end, $dbh_pat;	
-	
+	global $date_start, $date_end, $dbh_pat, $use_apps_table_for_dates;	
+		
+	//echo "USE APPS IS $use_apps_table_for_dates<BR><BR><BR>";
+		
 	$inventor_ids = $array;
 	$inv_num = count($inventor_ids);
 	
-	$sql  = "SELECT * FROM patent_inventor ";
-	$sql .= "JOIN application ON patent_inventor.patent_id = application.patent_id ";
+	if ($use_apps_table_for_dates == 1) {
+		$sql  = "SELECT * FROM patent_inventor ";
+		$sql .= "JOIN application ON patent_inventor.patent_id = application.patent_id ";
+	}
+	else {
+		$sql  = "SELECT patent_inventor.patent_id, patent_inventor.inventor_id, patent.date FROM patent_inventor ";
+		$sql .= "JOIN patent ON patent_inventor.patent_id = patent.id ";
+	}
+	
 	$sql .= "WHERE (inventor_id = '$inventor_ids[0]' ";
 	for ($i=1; $i<$inv_num; $i++) {
 		$sql .= "OR inventor_id = '$inventor_ids[$i]' ";
 	}
-	$sql .= ") AND application.date < '$date_end' AND application.date > '$date_start'";
+	
+	if ($use_apps_table_for_dates == 1) {
+		$sql .= ") AND application.date < '$date_end' AND application.date > '$date_start' ";
+	} else { 
+		$sql .= ") AND patent.date < '$date_end' AND patent.date > '$date_start' ";  }
+	
+	//echo "SQL is $sql<br><br>";
+	
 	$result = mysql_query($sql, $dbh_pat) or die(mysql_error());
 
 	$patents_found = mysql_num_rows($result);
-	//echo "SQL $sql<br>Patents found: $patents_found<br>";
+	
+	echo "Patents found: $patents_found<br>";
 	
 	$patents = array();
 	while($row = mysql_fetch_array($result)) {
@@ -188,9 +209,15 @@ $n++;
 $sql = "TRUNCATE $table";
 $result = mysql_query($sql, $dbh_local) or die(mysql_error());
 
-//Gather info
-$sql  = "SELECT patent.date AS date_granted, application.date AS date_applied, patent.id AS patent_id, inventor.id AS inventor_id, inventor.name_last, inventor.name_first, assignee.organization FROM patent ";
-$sql .= "JOIN application ON patent.id = application.patent_id ";
+//Gather info, applications.date version
+if ($use_apps_table_for_dates == 'apps') {
+	$sql  = "SELECT patent.date AS date_granted, application.date AS date_applied, patent.id AS patent_id, inventor.id AS inventor_id, 
+								   inventor.name_last, inventor.name_first, assignee.organization FROM patent ";
+	$sql .= "JOIN application ON patent.id = application.patent_id ";
+} else {
+	$sql  = "SELECT patent.date AS date_granted, patent.id AS patent_id, inventor.id AS inventor_id, inventor.name_last, inventor.name_first, 
+								   assignee.organization FROM patent ";
+}
 $sql .= "JOIN patent_inventor ON patent.id = patent_inventor.patent_id ";
 $sql .= "JOIN inventor ON inventor.id = patent_inventor.inventor_id ";
 $sql .= "JOIN patent_assignee ON patent.id = patent_assignee.patent_id ";
@@ -208,12 +235,17 @@ $row_count = mysql_num_rows($result);
 $index = 1;
 while($row = mysql_fetch_array($result)) {
 	$date_granted = $row['date_granted']; 
-	$date_applied = $row['date_applied'];
+	
+	if ($use_apps_table_for_dates == 'apps') { $date_applied = $row['date_applied']; }
+	else { $date_applied = ''; }
+		
 	$patent_id = $row['patent_id'];
 	$inventor_id = $row['inventor_id']; 
 	$name_first  = $row['name_first']; 
 	$name_last = $row['name_last'];
 	$organization = $row['organization'];
+	
+	$organization = str_replace("'"," ",$organization);
 	
 	//Storing these for stats
 	$final_patents[] = $patent_id;
@@ -252,6 +284,7 @@ while($row = mysql_fetch_array($result)) {
 //echo "Patents entered into local DB successfully<br>";
 
 
+
 //Future cites: For each unique patent, add them in
 $fc_sql  = "SELECT citation_id, COUNT(*) AS f_cites FROM uspatentcitation ";
 $fc_sql .= "WHERE (citation_id = '$patents[0]' ";
@@ -259,6 +292,8 @@ for ($i=1; $i<$count; $i++) {
 	$fc_sql .= "OR citation_id = '$patents[$i]' ";
 }
 $fc_sql .= ") GROUP BY citation_id ";
+
+//echo "FC_SQL is $fc_sql<Br><Br>";
 	
 $fc_result = mysql_query($fc_sql, $dbh_pat) or die(mysql_error());
 
@@ -268,8 +303,10 @@ while($fc_row = mysql_fetch_array($fc_result)) {
 	$cites = $fc_row['f_cites'];
 		
 	$update_q = "UPDATE $table SET future_cites = $cites WHERE patent_id = '$patent'";
+	$update = mysql_query($update_q, $dbh_local) or die(mysql_error());
+	//echo "$update_q<br>";
 }
-$update = mysql_query($update_q, $dbh_local) or die(mysql_error());
+
 
 //echo "Future cites entered into local DB successfully<br><br>";
 //End future cites
@@ -445,9 +482,8 @@ echo "Finished gathering data, moving on to formatting...<br><br>";
 
 
 //Now to return a value to decide how big the rendered image will be
-if ($count_inv > 500)
-	return 'big';
-else return 'reg';
+return $count_inv;
+
 
 }
 ?>
