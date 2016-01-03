@@ -11,25 +11,10 @@ include 'style/header.php';
 //-------------------------------------------------------------------
 //-------------------------------------------------------------------
 /*
-This is the main page for the Patent Co-Inventor Network Tool.
+This is the main page v2 for the Patent Co-Inventor Network Tool.
 
-The basic structure is as follows:
-
--Includes
--Defaults
--Database connections
--(Process any user inputs passed to the page via POST to PHP_SELF from before)
--Left half of the screen, where the user inputs/checks info
--Right half of the screen, which prints the output 
-
-It might eventually make sense to split this into two pages:
-index.php, which passes info to
-processing.php, which links users to
-render.php
-
-but for now this one page handles all but rendering.
-
-Styling is handled by /style/style.css, which could stand to be improved
+The difference from index.php is that this one doesn't try to do everything
+on one page. Instead, it takes user inputs, then passes them to processing.php.
 
 */
 //-------------------------------------------------------------------
@@ -114,11 +99,6 @@ else {
 }
 
 
-//Is FinFET? Checking if any of the origin IDs are FinFET inventors
-$ids = explode(",", $origin_ids);
-$holder_array = array_intersect($ids,$UCB_finfet_ids);
-if(!empty($holder_array) ){	$is_finfet = 1; }
-else{ $is_finfet = 0; }
 
 
 // -------------------------------------------------------------------
@@ -319,19 +299,13 @@ echo "<body>";
 
 
 // -------------------------------------------------------------------
-//First cell (left half of screen) is the user choices, right half will be processing area
-//Start the overall table
-echo "<table border='1'><tr><td width='600'>";
-
-// -------------------------------------------------------------------
 //Start user choices area
 
 //User choices
 echo "<div class='CSSTableGenerator' >";
 
-
 echo "<table border='1'>";
-echo "<form action='$PHP_SELF' method='post'>";
+echo "<form action='processing.php' method='post'>";
 echo "<tr><td>Select Parameters</td><td>  </td></tr>";
 
 //Generations
@@ -421,6 +395,7 @@ echo "</form>";
 //End form
 
 echo "<br><br>";
+
 // -------------------------------------------------------------------
 // -------------------------------------------------------------------
 //This section is for users to search for inventors
@@ -520,85 +495,6 @@ echo "</table>";
 echo "<input type='hidden' name='random_search' value='TRUE'>";
 echo "<br><input type='submit' name='search' value='Search'/>";
 echo "</form>";
-
-echo "</td>";
-
-
-
-
-// -------------------------------------------------------------------
-//End left half of screen (user choices)
-
-
-
-// -------------------------------------------------------------------
-// -------------------------------------------------------------------
-//Start right half (user feedback)
-echo "<td valign='top' >";
-
-echo "<div class='CSSTableGenerator' >";
-echo "<table>";
-echo "<tr><td style='background-color: #4CAF50'>Output</td></tr>";
-echo "<tr><td><b><font color='blue'>"; echo $output_string; 
-
-
-// -------------------------------------------------------------------
-// -------------------------------------------------------------------
-
-//If the Generate button has been pressed, generate the social network.
-if(isset($_POST['generate'])) {
-
-$origin_ids = explode(",", $origin_ids);	
-	//Confirm
-	echo "<br><br>";
-	echo "<b>Generating a visualization for the following selections:</b><br>";
-	echo "Generations:	$generation<br>";
-	echo "Start date:	$date_start<br>";
-	echo "End date:	    $date_end<br>";
-	echo "Origins:   "; echo print_r($origin_ids); echo " <br>";
-	//echo "Is finfet:   "; 
-	//	if ($is_finfet == 1) echo "Yes";
-	//	else echo "No";
-	echo "<br><br>";
-
-// -------------------------------------------------------------------
-//Generate Data
-
-//Generate the data, returning the number of final inventors
-$table_array = generate_data ($origin_ids, $generation, $date_start, $date_end, $is_finfet);
-$json = 'src'; 
-$json_univ = 'src_univ';
-
-//Generate the JSON
-$count_inv = generate_JSON($table_array);
-
-//I've found through approximations that the follow scaling works for the rendering
-$scale = 0.0025 * $count_inv * $count_inv + 3.38 * $count_inv + 1753;
-if ($scale > 8000){ $scale = 8000;}
-
-// -------------------------------------------------------------------
-//Print links to the rendered versions
-
-echo "<br><br>";
-
-echo "<b><h2>Success! Please follow <a href='render.php?screen_width=$scale&screen_height=$scale&charge=7000&json=$json' target='_blank'>this link</a> to your patent network map.</h1></b>";
-
-echo "<br><br>";
-
-echo "<b><h2>Or the industry/academy version: <a href='render.php?screen_width=$scale&screen_height=$scale&charge=7000&json=$json_univ' target='_blank'>this link</a></h1></b>";
-
-
-} //End "IF Generate button pressed" section
-
-// -------------------------------------------------------------------
-// -------------------------------------------------------------------
-
-echo "</b></font></td></tr>";
-echo "</table>";
-echo "</div>";
-
-echo "</td></tr></table>";
-
 
 echo "</body>";
 

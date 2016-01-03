@@ -11,9 +11,11 @@ Basically it adds everything step-by-step to a single string ($basic_render_stri
 */
 
 
-function generate_JSON($verbose = '0') {
+function generate_JSON($table_array) {
 
-global $dbh_local, $table;
+global $dbh_local;
+
+$verbose = 0;
 
 echo "Processing underway...<br><br>";
 
@@ -27,14 +29,14 @@ $univ_acad_string = "";
 $links = array();
 //Going to cycle through all patents. First, array of all patents
 
-$sql = "SELECT DISTINCT patent_id FROM $table";
-$result = mysql_query($sql, $dbh_local) or die(mysql_error());
+$all_patents = array();
+foreach ($table_array as $key => $data) {
+   	$all_patents[] = $data['patent_id'];
+ } //Ends "foreach" loop
 
-$unique_patent_ids = array();
-while($row = mysql_fetch_array($result)) {
-  	$curr_pat = $row['patent_id'];
-	$unique_patent_ids[] = $curr_pat;
-}
+$unique_patent_ids = make_unique($all_patents);
+$patents_count = count($unique_patent_ids);
+//Now we have an array of all unique patents, and a count
 
 //Now, starting the cycle through the unique patents
 $patents_count = count($unique_patent_ids);
@@ -42,20 +44,19 @@ $links = array();
 for ($x=0; $x<$patents_count; $x++) {
 	$patent_id = $unique_patent_ids[$x];
 
-	//Find inventors for this individual patent
-	$this_sql = "SELECT * FROM $table WHERE patent_id = '$patent_id'";
-	$this_result = mysql_query($this_sql) or die(mysql_error());
-
+	//Find inventors for this individual patent, add to temporary array
 	$curr_patent_inventors = array();
-	while($this_row = mysql_fetch_array($this_result)) { //Start fetching this patent's inventors
-  		$name_last = $this_row['name_last'];
-		$name_first = $this_row['name_first'];
-		$name = "$name_last; $name_first";
 	
-		//Add this inventor to the current patent's temporary array of all its inventors
-		$curr_patent_inventors[] = $name;
-	} //End fetching this patent's inventors (while loop)
-
+	foreach ($table_array as $key => $data) {
+   		if ($data['patent_id'] == $patent_id) {
+				$name_last = $data['name_last'];
+				$name_first = $data['name_first'];
+				$name = "$name_last; $name_first";
+		    	
+				$curr_patent_inventors[] = $name;
+		}
+ 	} //Ends "foreach" loop
+	
 	//Now iterate across these inventors for the links section
 	$ids = $curr_patent_inventors;
 	//$combinations = array();
@@ -70,6 +71,7 @@ for ($x=0; $x<$patents_count; $x++) {
 			$links[] = $str;
 	  }
 	}
+	unset($curr_patent_inventors);
 } //Ends loops for this unique patent
 
 //We don't need repeats, so
@@ -109,43 +111,60 @@ $univ_acad_string = $basic_render_string;
 //     START of assignee_count
 $assignee_count = array();
 
-$sql = "SELECT organization, COUNT(organization) AS occurrences FROM $table  GROUP BY organization  ORDER BY occurrences DESC";
-$result = mysql_query($sql, $dbh_local) or die(mysql_error());					   
-$n = 1;
-$top_10 = array();
-while($row = mysql_fetch_array($result)) {
-	$assignee = $row['organization'];
-	$occurrences = $row['occurrences'];
-	$occurrences = intval($occurrences); //Change this into an integer rather than a string
-	
-	$top_10[$n-1] = "$assignee"; //Setting up the next section
-	$n++;
-	
-	$assignee_count[$assignee] = $occurrences;
-	//echo "\"$assignee\":$occurrences<br>";	
+
+$all_organizations = array();
+foreach ($table_array as $key => $data) {
+   	$all_organizations[] = $data['organization'];
+ } //Ends "foreach" loop
+
+$assignee_count = array_count_values($all_organizations);
+
+arsort($assignee_count);
+//Now we have an array with the organizations as the key, and the number of occurances as value, descending
+
+//Putting top 10 assignees into their own array for later usage
+$keys = array_keys($assignee_count);
+for ($x = 0; $x<10; $x++) {
+	$top_10[$x] = $keys[$x];
 }
+//print_r($top_10);
+
+$assignee_count = clean($assignee_count);
+
+//var_dump($assignee_count);
 
 $basic_render_string .= "bubble_assignee_count=\n";
-$basic_render_string .= json_encode($assignee_count);
+$basic_render_string .= json_encode($assignee_count, JSON_NUMERIC_CHECK);
 $basic_render_string .= ";\n\n";
 
 if ($verbose == 1) {
 echo "<br>";
 echo "bubble_assignee_count=<br>";
-echo json_encode($assignee_count);
+echo json_encode($assignee_count, JSON_NUMERIC_CHECK);
 echo "<br>";
 }
 // --------------------------------
 //How many industry, how many academia-related
 $univ_count = array();
 
-$sql = "SELECT DISTINCT inventor_id FROM $table";
-$result = mysql_query($sql, $dbh_local) or die(mysql_error());					   
-$num_inventors = mysql_num_rows($result);
 
-$sql = "SELECT DISTINCT inventor_id FROM $table WHERE acad_if_one='1'";
-$result = mysql_query($sql, $dbh_local) or die(mysql_error());					   
-$num_acad_inv = mysql_num_rows($result);
+$all_inventors = array();
+$acad_inventors = array();
+foreach ($table_array as $key => $data) {
+   	    $all_inventors[] = $data['inventor_id'];
+	if ($data['acad_if_one'] == 1) { 
+	    $acad_inventors[] = $data['inventor_id']; 
+		}
+	
+ } //Ends "foreach" loop
+
+//Count unique inventors
+$unique_inventors_ids = make_unique($all_inventors);
+$num_inventors = count($unique_inventors_ids);
+
+//Count academic inventors
+$unique_acad = make_unique($acad_inventors);
+$num_acad_inv = count($unique_acad);
 
 $num_priv_inv = $num_inventors - $num_acad_inv;
 
@@ -153,15 +172,17 @@ $num_priv_inv = $num_inventors - $num_acad_inv;
 $assignee_count_new['Industry'] = $num_priv_inv;
 $assignee_count_new['Academia'] = $num_acad_inv;
 
+$assignee_count_new = clean($assignee_count_new);
+
 $univ_acad_string .= "bubble_assignee_count=\n";
-$univ_acad_string .= json_encode($assignee_count_new);
+$univ_acad_string .= json_encode($assignee_count_new, JSON_NUMERIC_CHECK);
 $univ_acad_string .= ";\n\n";
 
 // --------------------------------
 if ($verbose == 1) {
 echo "<br>";
 echo "bubble_assignee_count=<br>";
-echo json_encode($assignee_count);
+echo json_encode($assignee_count, JSON_NUMERIC_CHECK);
 echo "<br>";
 }
 
@@ -172,6 +193,7 @@ echo "<br>";
 //     START of assignee_index
 
 $assignee_index = array();
+
 for ($x=0; $x<10; $x++) {
 	$y = $x+1;
 	
@@ -180,8 +202,10 @@ for ($x=0; $x<10; $x++) {
    //echo "\"$top_10[$x]\":$y,<br>";
 }
 
+$assignee_index = clean($assignee_index);
+
 $basic_render_string .= "bubble_assignee_index=\n";
-$basic_render_string .= json_encode($assignee_index);
+$basic_render_string .= json_encode($assignee_index, JSON_NUMERIC_CHECK);
 $basic_render_string .= ";\n\n";
 
 // --------------------------------
@@ -190,16 +214,17 @@ $basic_render_string .= ";\n\n";
 $assignee_index_new['Industry'] = 1;
 $assignee_index_new['Academia'] = 2;
 
+$assignee_index_new = clean($assignee_index_new);
 
 $univ_acad_string .= "bubble_assignee_index=\n";
-$univ_acad_string .= json_encode($assignee_index_new);
+$univ_acad_string .= json_encode($assignee_index_new, JSON_NUMERIC_CHECK);
 $univ_acad_string .= ";\n\n";
 
 // --------------------------------
 if ($verbose == 1) {
 echo "<br>";
 echo "bubble_assignee_index=<br>";
-echo json_encode($assignee_index);
+echo json_encode($assignee_index, JSON_NUMERIC_CHECK);
 echo "<br>";
 }
 //     END of assignee_index
@@ -208,35 +233,88 @@ echo "<br>";
 
 //     START inventor_assignee
 //echo "bubble_inventor_assignee=";
-$inventor_assignee = array();
 
 //Need to cycle through unique names
-$sql = "SELECT DISTINCT name_first,name_last FROM $table ORDER BY name_last ASC, name_first ASC";
-$result = mysql_query($sql, $dbh_local) or die(mysql_error());	
+$inventor_names = array();
+foreach ($table_array as $key => $data) {
+   	    $first = $data['name_first'];
+		$last = $data['name_last'];
+		$name = "$last; $first";
+		$inventor_names[] = $name;	
+} //Ends "foreach" loop
+$inventor_names = make_unique($inventor_names);
+sort($inventor_names);
 
+//print_r($inventor_names);
+
+//Note: Unique inventor IDs are still stored in $unique_inventors_ids
+
+//Need to find the most recent affiliation for each inventor
 $multi_inventors = array();
-while($row = mysql_fetch_array($result)) {
-	$name_last = $row['name_last'];
-	$name_first = $row['name_first'];
-	$name = "$name_last; $name_first";
-	
-	//First, going to check if there are multiple assignees associated with this name
-	$sql2 = "SELECT organization, acad_if_one FROM $table"
-				." WHERE name_first='$name_first' AND name_last='$name_last' "
-				." ORDER BY date_applied ASC";
-	$result2 = mysql_query($sql2, $dbh_local) or die(mysql_error());
-	
-	$orgs = array();
-	while ($row2 =  mysql_fetch_array($result2)) {
-		$assignee = $row2['organization'];
-		$acad_if_one = $row2['acad_if_one'];
-		$orgs[] = $assignee;
-	}
-	$orgs = array_unique($orgs);
-	$num_orgs = count($orgs);
 
-	// Creates array of multiple assignees
-	if ($num_orgs > 1) { $multi_inventors[] = $name;} 
+
+//print_r($table_array);
+
+$inventor_assignee = array();
+foreach ($inventor_names as $inventor_name) {
+	$affiliations = 0;
+	$temp_date = '1800-01-01';
+	$assignee = 'None';
+	$acad_if_one = 0;
+	
+	//echo "Inventor going is $inventor_name<br>";
+
+	foreach ($table_array as $key => $data) {
+   		$first = $data['name_first'];
+		$last = $data['name_last'];
+		$name = "$last; $first";
+
+		//First, we need to see if we're going by date_applied or date_granted. Only one should exist
+		$curr_date = $data['date_granted'];
+		$curr_date_app = $data['date_applied'];
+		if ($curr_date_app > '1900-01-01') {$curr_date = $curr_date_app;}
+		//echo "Current date is $curr_date<br>";
+
+		//Now cycle through patents and figure out which match this inventor	
+		if ($name == $inventor_name) {
+			
+			if ($data['acad_if_one'] == 1) { $acad_if_one = 1; }
+			
+			//We're found a patent with the correct inventor. Now see if it's the same org
+			$org = $data['organization'];
+			if ($org == $assignee) {  //Same assignee, so just update the date
+				
+				
+				//echo "date $temp_date less than $curr_date<br>";
+								
+				if ($temp_date < $curr_date) {
+					$temp_date = $curr_date;
+					}
+				
+				 }			
+			else {  //A different assignee. See if it's more recent
+				if ($assignee == 'None') {
+					$assignee = $org;
+					$temp_date = $curr_date;
+				}
+				
+				$affiliations++;
+				//echo "date $temp_date less than $curr_date";
+										
+				if ($temp_date < $curr_date) {
+					$assignee = $org;
+					$temp_date = $curr_date;
+					}			
+			}
+				
+		}
+		
+	} //Ends "foreach" loop
+	
+	//echo "Current idea of assignee $inventor_name is assignee $assignee on date $temp_date <br>";
+	
+		// If an inventor with multiple assignees, add to that array
+	if ($affiliations > 1) { $multi_inventors[] = $inventor_name; }
 	
 	//Regardless, match the most recent assignee to the Top-10 assignee list
 	$found = array_search($assignee, $top_10);
@@ -244,31 +322,38 @@ while($row = mysql_fetch_array($result)) {
 	   else { $code = 1000; }
 	if ($code > 10) $code = 1000;
 	
-	$inventor_assignee[$name] = $code;
-	//echo "\"$name_last; $name_first\":$code,<br>";
+	$inventor_assignee[$inventor_name] = $code;
 	
-	if ($acad_if_one == 1) { $inv_acad[$name] = 2; }
-	elseif ($acad_if_one == 0) { $inv_acad[$name] = 1; }
+	//For acad/industry view
+	if ($acad_if_one == 1) { $inv_acad[$inventor_name] = 2; }
+	elseif ($acad_if_one == 0) { $inv_acad[$inventor_name] = 1; }
+
+	//Done with this inventor, on to the next one	
 	
-		unset($orgs);//Reset this array for the while loop						   		
-} //Ends while loop - on to the next unique inventor
+} //Ends foreach loop
+
+//print_r($inventor_assignee);
+
 
 //$multiples = count($multi_inventors);
 //echo "MULTIPLES count $multiples";
 
+$inventor_assignee = clean($inventor_assignee);
+$inv_acad = clean($inv_acad);
+
 $basic_render_string .= "bubble_inventor_assignee=\n";
-$basic_render_string .= json_encode($inventor_assignee);
+$basic_render_string .= json_encode($inventor_assignee, JSON_NUMERIC_CHECK);
 $basic_render_string .= ";\n\n";
 // --------------------------------
 $univ_acad_string .= "bubble_inventor_assignee=\n";
-$univ_acad_string .= json_encode($inv_acad);
+$univ_acad_string .= json_encode($inv_acad, JSON_NUMERIC_CHECK);
 $univ_acad_string .= ";\n\n";
 
 // --------------------------------
 if ($verbose == 1) {
 echo "<br>";
 echo "bubble_inventor_assignee=<br>";
-echo json_encode($inventor_assignee);
+echo json_encode($inventor_assignee, JSON_NUMERIC_CHECK);
 echo "<br>";
 }
 
@@ -276,15 +361,17 @@ echo "<br>";
 // -------------------------------------------------------------------
 // START new section: Inventors with multiple assignees associated to them
 
+$multi_inventors = clean($multi_inventors);
+
 $basic_render_string .= "bubble_inventors_with_multiple_assignees=\n";
-$basic_render_string .= json_encode($multi_inventors);
+$basic_render_string .= json_encode($multi_inventors, JSON_NUMERIC_CHECK);
 $basic_render_string .= ";\n\n";
 
 // --------------------------------
 if ($verbose == 1) {
 echo "<br>";
 echo "bubble_inventors_with_multiple_assignees=<br>";
-echo json_encode($multi_inventors);
+echo json_encode($multi_inventors, JSON_NUMERIC_CHECK);
 echo "<br>";
 }
 
@@ -292,39 +379,46 @@ echo "<br>";
 // -------------------------------------------------------------------
 //     START inventor_citation
 //echo "bubble_inventor_citation=";
-$inventor_citation = array();
+$inventor_citation = array();   //Array with inventor name as index, future cites as value
 
-$sql = "SELECT name_last, name_first, SUM(future_cites) as personal_cites FROM $table"
-				." GROUP BY name_last, name_first";
-	$result = mysql_query($sql, $dbh_local) or die(mysql_error());
+//Cycle through inventors, find their future citations
+foreach ($inventor_names as $inventor_name) {
+	$cites = 0;
+
+	foreach ($table_array as $key => $data) {
+		$first = $data['name_first'];
+		$last = $data['name_last'];
+		$name = "$last; $first";
+		
+		if ($name == $inventor_name) {						
+			$cites = $cites + $data['future_cites'];
+		}
+		
+	} //Ends "foreach" loop
 	
-	while($row = mysql_fetch_array($result)) {	
-		$name_last = $row['name_last'];
-	    $name_first = $row['name_first'];
-		$name = "$name_last; $name_first";
-		
-		$cites = $row['personal_cites'];
-		$cites = intval($cites);
-		
-		$inventor_citation[$name] = $cites;
-		//echo "\"$name_last; $name_first\":$cites,<br>";
-	}
+	$inventor_citation[$inventor_name] = $cites;
+	//Done with this inventor, on to the next one	
+	
+} //Ends foreach loop
+
+$inventor_citation = clean($inventor_citation);
 
 $basic_render_string .= "bubble_inventor_citation=\n";
-$basic_render_string .= json_encode($inventor_citation);
+$basic_render_string .= json_encode($inventor_citation, JSON_NUMERIC_CHECK);
 $basic_render_string .= ";\n\n";
 // --------------------------------
 $univ_acad_string .= "bubble_inventor_citation=\n";
-$univ_acad_string .= json_encode($inventor_citation);
+$univ_acad_string .= json_encode($inventor_citation, JSON_NUMERIC_CHECK);
 $univ_acad_string .= ";\n\n";
 
 // --------------------------------
 if ($verbose == 1) {
 echo "<br>";
 echo "bubble_inventor_citation=<br>";
-echo json_encode($inventor_citation);
+echo json_encode($inventor_citation, JSON_NUMERIC_CHECK);
 echo "<br>";
 }
+
 
 // -------------------------------------------------------------------
 // -------------------------------------------------------------------
@@ -353,6 +447,10 @@ file_put_contents($json_file, $input);
 fclose($fp);
 
 }
+
+
+$count_inv = count($inventor_names);
+return $count_inv;
 
 ?>
 

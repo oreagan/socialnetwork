@@ -10,34 +10,6 @@ include 'style/header.php';
 
 //-------------------------------------------------------------------
 //-------------------------------------------------------------------
-/*
-This is the main page for the Patent Co-Inventor Network Tool.
-
-The basic structure is as follows:
-
--Includes
--Defaults
--Database connections
--(Process any user inputs passed to the page via POST to PHP_SELF from before)
--Left half of the screen, where the user inputs/checks info
--Right half of the screen, which prints the output 
-
-It might eventually make sense to split this into two pages:
-index.php, which passes info to
-processing.php, which links users to
-render.php
-
-but for now this one page handles all but rendering.
-
-Styling is handled by /style/style.css, which could stand to be improved
-
-*/
-//-------------------------------------------------------------------
-//-------------------------------------------------------------------
-
-
-//-------------------------------------------------------------------
-//-------------------------------------------------------------------
 //Includes
 include 'generate_data.php';
 include 'generate_JSON.php';
@@ -123,93 +95,9 @@ else{ $is_finfet = 0; }
 
 // -------------------------------------------------------------------
 // -------------------------------------------------------------------
-//Processing section for the name search section below
-if(isset($_POST['search_name'])) {
-	
-	if(!isset($_POST['has_searched'])) {
-		$has_searched = 1;
-	}
-	else {
-		$has_searched = $_POST['has_searched'] + 1;
-		$previous_ids = $_POST['previous_ids'];
-	}
-
-	//First name
-	if(isset($_POST['first'])) {
-		$first = $_POST['first'];
-	}
-	else $first = "";
-
-
-	//Last name
-	if(isset($_POST['last'])) {
-		$last = $_POST['last'];
-	}
-	else $last = "";
-
-	$people = array();
-
-	$first = strtoupper($first); //Capitalize all
-	$first = str_replace("-"," ",$first); //Remove hyphens
-	$first = str_replace("'"," ",$first); //Remove apostrophes
-	$first = rtrim($first, '.'); //Remove trailing periods
-	
-	//echo "Origin name: $first $last<br><br>";
-	
-	$last1 = $last;
-	$last2 = str_replace("'"," ",$last);
-	$last3 = str_replace(" ","",$last);
-	
-	$sql  = "SELECT * FROM inventor WHERE name_last = '$last1' OR ";
-	$sql .=           "name_last = '$last2' OR name_last = '$last3' ORDER BY name_first ";
-	$result = mysql_query($sql, $dbh_pat) or die(mysql_error());
-
-	while($row = mysql_fetch_array($result)) {
-		$temp_first  = $row['name_first'];
-		$orig_name = $temp_first;
-		$id = $row['id'];
-	
-		$temp_first = strtoupper($temp_first);
-		$temp_first = str_replace("-"," ",$temp_first); //Remove hyphens
-		$temp_first = str_replace("'"," ",$temp_first); //Remove apostrophes
-		$temp_first = rtrim($temp_first, '.'); //Remove trailing periods
-		
-		$smashed_first = str_replace(" ","",$temp_first);
-		
-		if (($first == $temp_first) || ($first == $smashed_first)) { 
-			
-			$output_string .= "Name added: $orig_name $last  ID: $id<br>";
-			//echo "<font color='red'>Name added: $orig_name $last  ID: $id</font><br>";
-			$people[] = $id;
-			}
-	}
-	//echo "<br><br>";
-
-	//echo "Input people is "; print_r($people); echo "<br><br>";
-
-	$people = implode(",", $people);
-	
-	$origin_ids = $people;
-	if(isset($_POST['has_searched'])) {
-		$origin_ids = "$previous_ids,$people";
-	}
-	else $origin_ids = $people;
-	
-	//echo "User IDs to add: $people<br><br>";
-
-	//Log this
-	$counter_query = "INSERT INTO inventors_searched (name_first,name_last,datetime,ip) VALUES ('$first','$last','$current_datetime','$ip')";
-	$counter = mysql_query($counter_query, $dbh_local) or die(mysql_error());
-
-
-}
-//End of dealing with name search input
-
-// -------------------------------------------------------------------
-// -------------------------------------------------------------------
 //Process the sub-class search if someone did that
 
-elseif(isset($_POST['subclass_search'])) {
+if(isset($_POST['subclass_search'])) {
 
 	$main_class = $_POST['main_class'];
 	$sub_class = $_POST['sub_class'];
@@ -273,22 +161,6 @@ elseif(isset($_POST['subclass_search'])) {
 	
 }
 
-
-// -------------------------------------------------------------------
-// -------------------------------------------------------------------
-//Process the sampled full class search if someone did that
-
-elseif(isset($_POST['random_search'])) {
-	
-	$main_class = $_POST['main_class'];
-	$year = $_POST['year'];
-	
-	$print = random_inventors ($main_class, $year);
-	
-	$origin_ids = $print;
-	
-}
-
 // -------------------------------------------------------------------
 // -------------------------------------------------------------------
 //What's printed on the screen
@@ -321,7 +193,7 @@ echo "<body>";
 // -------------------------------------------------------------------
 //First cell (left half of screen) is the user choices, right half will be processing area
 //Start the overall table
-echo "<table border='1'><tr><td width='600'>";
+echo "<table border='1'><tr><td>";
 
 // -------------------------------------------------------------------
 //Start user choices area
@@ -331,7 +203,7 @@ echo "<div class='CSSTableGenerator' >";
 
 
 echo "<table border='1'>";
-echo "<form action='$PHP_SELF' method='post'>";
+echo "<form action='processing.php' method='post'>";
 echo "<tr><td>Select Parameters</td><td>  </td></tr>";
 
 //Generations
@@ -421,35 +293,7 @@ echo "</form>";
 //End form
 
 echo "<br><br>";
-// -------------------------------------------------------------------
-// -------------------------------------------------------------------
-//This section is for users to search for inventors
 
-
-echo "<form action='$PHP_SELF' method='post'>";
-echo "<b>Search by Inventor Name (Optional)</b><br>";
-
-echo "<ul><li>Note: The first time you search, it will replace the defaults. Subsequent searches will add to the list</li></ul>";
-
-echo "Name to insert as an origin ID (eg Steve Jobs):";
-echo "<table border='1'>";
-
-echo "<tr><td>First</td><td>Last</td></tr>";
-echo "<tr>";
-echo "<td><input type='text' name='first' value='$first'></td>";
-echo "<td><input type='text' name='last' value='$last'></td>";
-echo "</tr>";
-
-echo "</table>";
-
-if($has_searched >= 1) {
-	echo "<input type='hidden' name='has_searched' value='$has_searched'>";
-	echo "<input type='hidden' name='previous_ids' value='$origin_ids'>";
-}
-
-echo "<input type='hidden' name='search_name' value='TRUE'>";
-echo "<br><input type='submit' name='Search' value='Search'/>";
-echo "</form>";
 // -------------------------------------------------------------------
 // -------------------------------------------------------------------
 
@@ -493,111 +337,6 @@ echo "</table>";
 echo "<input type='hidden' name='subclass_search' value='TRUE'>";
 echo "<br><input type='submit' name='search' value='Search'/>";
 echo "</form>";
-
-// -------------------------------------------------------------------
-// -------------------------------------------------------------------
-
-//Section to use sampled inventors from patent class
-echo "<b>Search for a sample of inventors in an entire patent class (Optional)</b><br>";
-echo "<ul>";
-echo "<li>This will find (up to) 10 patents/month granted in the closen patent class and year, then find their inventors</li>";
-echo "<li>More information on USPTO classifications, and full documentation of them, can be found at <a href='http://www.uspto.gov/web/patents/classification/'>http://www.uspto.gov/web/patents/classification/</a></li></ul>";
-
-echo "<form action='$PHP_SELF' method='post'>";
-
-echo "Patent subclass (eg 257):<br>";
-
-echo "<table border='1'>";
-
-echo "<tr><td>Main class</td><td>Year (eg 1980)</td>";
-echo "<tr>";
-echo "<td><input type='text' name='main_class' value=''></td>";
-echo "<td><input maxlength='10' type='text' name='year'></td>";
-echo "</tr>";
-
-echo "</table>";
-
-echo "<input type='hidden' name='random_search' value='TRUE'>";
-echo "<br><input type='submit' name='search' value='Search'/>";
-echo "</form>";
-
-echo "</td>";
-
-
-
-
-// -------------------------------------------------------------------
-//End left half of screen (user choices)
-
-
-
-// -------------------------------------------------------------------
-// -------------------------------------------------------------------
-//Start right half (user feedback)
-echo "<td valign='top' >";
-
-echo "<div class='CSSTableGenerator' >";
-echo "<table>";
-echo "<tr><td style='background-color: #4CAF50'>Output</td></tr>";
-echo "<tr><td><b><font color='blue'>"; echo $output_string; 
-
-
-// -------------------------------------------------------------------
-// -------------------------------------------------------------------
-
-//If the Generate button has been pressed, generate the social network.
-if(isset($_POST['generate'])) {
-
-$origin_ids = explode(",", $origin_ids);	
-	//Confirm
-	echo "<br><br>";
-	echo "<b>Generating a visualization for the following selections:</b><br>";
-	echo "Generations:	$generation<br>";
-	echo "Start date:	$date_start<br>";
-	echo "End date:	    $date_end<br>";
-	echo "Origins:   "; echo print_r($origin_ids); echo " <br>";
-	//echo "Is finfet:   "; 
-	//	if ($is_finfet == 1) echo "Yes";
-	//	else echo "No";
-	echo "<br><br>";
-
-// -------------------------------------------------------------------
-//Generate Data
-
-//Generate the data, returning the number of final inventors
-$table_array = generate_data ($origin_ids, $generation, $date_start, $date_end, $is_finfet);
-$json = 'src'; 
-$json_univ = 'src_univ';
-
-//Generate the JSON
-$count_inv = generate_JSON($table_array);
-
-//I've found through approximations that the follow scaling works for the rendering
-$scale = 0.0025 * $count_inv * $count_inv + 3.38 * $count_inv + 1753;
-if ($scale > 8000){ $scale = 8000;}
-
-// -------------------------------------------------------------------
-//Print links to the rendered versions
-
-echo "<br><br>";
-
-echo "<b><h2>Success! Please follow <a href='render.php?screen_width=$scale&screen_height=$scale&charge=7000&json=$json' target='_blank'>this link</a> to your patent network map.</h1></b>";
-
-echo "<br><br>";
-
-echo "<b><h2>Or the industry/academy version: <a href='render.php?screen_width=$scale&screen_height=$scale&charge=7000&json=$json_univ' target='_blank'>this link</a></h1></b>";
-
-
-} //End "IF Generate button pressed" section
-
-// -------------------------------------------------------------------
-// -------------------------------------------------------------------
-
-echo "</b></font></td></tr>";
-echo "</table>";
-echo "</div>";
-
-echo "</td></tr></table>";
 
 
 echo "</body>";

@@ -36,7 +36,7 @@ if ($is_finfet == 1) {
 		echo "Finfet correction negated, date before $compare<br><br>";
 		$is_finfet = 0;}	
 	if ($start_date > $compare) {
-		echo "Finfet correction negated, date before $compare<br><br>";
+		echo "Finfet correction negated, date after $compare<br><br>";
 		$is_finfet = 0;}
 }
 //End hacky solution
@@ -45,128 +45,6 @@ $table = 'socialnetwork';
 
 mysql_select_db("uspto", $dbh_pat) or die("Could not select uspto");
 mysql_select_db("wbtmougo_dblood", $dbh_local) or die("Could not select local");
-
-// -------------------------------------------------------------------
-// -------------------------------------------------------------------
-//Functions
-
-function substr_count_array( $haystack, $needle ) {
-     $count = 0;
-     foreach ($needle as $substring) {
-          $count += substr_count( $haystack, $substring);
-     }
-     return $count;
-}
-
-function disambiguate_first($first) {
-	$first = strtoupper($first); //Capitalize all
-	$first = str_replace("-"," ",$first); //Remove hyphens
-	$first = str_replace("'"," ",$first); //Remove apostrophes
-	$first = rtrim($first, '.'); //Remove trailing periods
-	
-	if ($first == 'CHEN MING') {$first = 'CHENMING';}
-	if ($first == 'HON SUM PHILIP') {$first = 'H. S. PHILIP';}
-
-	return $first;
-}
-
-function disambiguate_last($last) {
-	$last = ucfirst(strtolower($last)); //Capitalize first letter, lower-case others
-	$last = str_replace("'"," ",$last); //Remove apostrophes
-
-	return $last;
-}
-
-//This re-indexes an array after removing duplicates
-function make_unique($array) {
-	$array = array_unique($array);
-	$temp = array_values($array);
-	$array = $temp;
-	
-	return $array;	
-}
-
-// -------------------------------------------------------------------
-// -------------------------------------------------------------------
-//Functions that are the main body
-
-//This function takes an array of inventor ids and return all patent ids associated
-function patents_by_inventors($array) {
-	global $date_start, $date_end, $dbh_pat, $use_apps_table_for_dates;	
-		
-	//echo "USE APPS IS $use_apps_table_for_dates<BR><BR><BR>";
-		
-	$inventor_ids = $array;
-	$inv_num = count($inventor_ids);
-	
-	if ($use_apps_table_for_dates == 1) {
-		$sql  = "SELECT * FROM patent_inventor ";
-		$sql .= "JOIN application ON patent_inventor.patent_id = application.patent_id ";
-	}
-	else {
-		$sql  = "SELECT patent_inventor.patent_id, patent_inventor.inventor_id, patent.date FROM patent_inventor ";
-		$sql .= "JOIN patent ON patent_inventor.patent_id = patent.id ";
-	}
-	
-	$sql .= "WHERE (inventor_id = '$inventor_ids[0]' ";
-	for ($i=1; $i<$inv_num; $i++) {
-		$sql .= "OR inventor_id = '$inventor_ids[$i]' ";
-	}
-	
-	if ($use_apps_table_for_dates == 1) {
-		$sql .= ") AND application.date < '$date_end' AND application.date > '$date_start' ";
-	} else { 
-		$sql .= ") AND patent.date < '$date_end' AND patent.date > '$date_start' ";  }
-	
-	//echo "SQL is $sql<br><br>";
-	
-	$result = mysql_query($sql, $dbh_pat) or die(mysql_error());
-
-	$patents_found = mysql_num_rows($result);
-	
-	echo "Patents found: $patents_found<br>";
-	
-	$patents = array();
-	while($row = mysql_fetch_array($result)) {
-		$patents[] = $row['patent_id'];
-	}
-	
-	if ($is_finfet == 1) $patents[] = '6413802';
-
-	$patents = make_unique($patents);
-	
-	return $patents;
-}
-
-//This function takes an array of patent ids and return the inventor ids associated with them
-function inventors_of_patents($array) {
-	global $date_start, $date_end, $dbh_pat;
-	
-	$patents = $array;
-	$pat_count = count($patents);
-	//echo "Number of patents passed: $pat_count<br>";echo print_r($patents);
-	
-	$sql  = "SELECT * FROM patent_inventor ";
-	$sql .= "WHERE (patent_inventor.patent_id = '$patents[0]' ";
-	for ($i=1; $i<$pat_count; $i++) {
-		$sql .= "OR patent_inventor.patent_id = '$patents[$i]' ";
-	}
-	$sql .= ") ";
-
-	$result = mysql_query($sql, $dbh_pat) or die(mysql_error());
-	
-	$pat_found = mysql_num_rows($result);
-	//echo "SQL $sql<br>Patents found: $pat_found<br><br>";
-
-	$inventors = array();
-	while($row = mysql_fetch_array($result)) {
-  		$inventors[] = $row['inventor_id'];
-	}
-
-	$inventors = make_unique($inventors);
-
-	return $inventors;	
-}
 
 // -------------------------------------------------------------------
 // -------------------------------------------------------------------
@@ -232,6 +110,7 @@ $result = mysql_query($sql, $dbh_pat) or die(mysql_error());
 
 $row_count = mysql_num_rows($result);
 
+$table_array = array();
 $index = 1;
 while($row = mysql_fetch_array($result)) {
 	$date_granted = $row['date_granted']; 
@@ -241,11 +120,9 @@ while($row = mysql_fetch_array($result)) {
 		
 	$patent_id = $row['patent_id'];
 	$inventor_id = $row['inventor_id']; 
-	$name_first  = $row['name_first']; 
-	$name_last = $row['name_last'];
-	$organization = $row['organization'];
-	
-	$organization = str_replace("'"," ",$organization);
+	$name_first  = clean($row['name_first']); 
+	$name_last = clean($row['name_last']);
+	$organization = clean($row['organization']);
 	
 	//Storing these for stats
 	$final_patents[] = $patent_id;
@@ -256,16 +133,24 @@ while($row = mysql_fetch_array($result)) {
 	$name_first = disambiguate_first($name_first);
 	$name_last = disambiguate_last($name_last);
 	
-	$fields = "index, date_granted, date_applied, patent_id, inventor_id, name_first, name_last, organization, future_cites, acad_if_one";
 	
-	//Check for duplicates
-	$dupesql = "SELECT * FROM $table where (patent_id = '$patent_id' AND name_last = '$name_last' AND name_first = '$name_first')";
-	
-	//echo "Name: $name_last $name_first<br>"; 
-	$duperaw = mysql_query($dupesql, $dbh_local);
-	if (!(mysql_num_rows($duperaw) > 0)) { 
-	//Not a duplicate, so
-		
+	//Check if duplicate. If so, skip. If not, add to the $table_array
+	$found = false;
+	if ($table_array) {  //If the table_array exists (ie this isn't the first entry),
+		foreach ($table_array as $key => $data) {
+   			 if ($data['patent_id'] == $patent_id && 
+		 	     $data['name_last'] == $name_last &&
+			     $data['name_first'] == $name_first ) {  
+				     $found = true;
+					 $break;// This is a duplicate, skip it
+				} //Ends "if it's a match"
+   	 	} //Ends "foreach" loop
+	} //Ends "if $table_array exists" check 
+
+
+	//Not a duplicate, so:
+	if ($found === false) { 
+    
 		//Special corrections for finfet example
    		if ($is_finfet == 1) { 
 			if ($name_first == 'TSU JAE KING') {
@@ -273,15 +158,23 @@ while($row = mysql_fetch_array($result)) {
 				$name_last = 'King'; }
 		}
 	
-		$insert_q = "INSERT INTO $table VALUES('$index','$date_granted','$date_applied','$patent_id','$inventor_id','$name_first','$name_last','$organization','1','0')";
-		
-		//echo "$insert_q<br>";
-		$insert = mysql_query($insert_q, $dbh_local) or die(mysql_error());
+		//Add to the table (in memory)
+		$table_array[$index] = array("date_granted"=>$date_granted,
+								 "date_applied"=>$date_applied,
+								 "patent_id"=>$patent_id,
+								 "inventor_id"=>$inventor_id,
+								 "name_first"=>$name_first,
+								 "name_last"=>$name_last,
+								 "organization"=>$organization,
+								 "future_cites"=>0,
+								 "acad_if_one"=>0);	
 	
-		$index++;
-	}
-}
-//echo "Patents entered into local DB successfully<br>";
+	      $index++;
+	 } //Ends "not a duplicate" area
+	
+}  //Ends processing for individual  patents
+
+//echo "Patents entered into table in memory<br>";
 
 
 
@@ -297,86 +190,62 @@ $fc_sql .= ") GROUP BY citation_id ";
 	
 $fc_result = mysql_query($fc_sql, $dbh_pat) or die(mysql_error());
 
-$update_q = "";
+
+
+
 while($fc_row = mysql_fetch_array($fc_result)) {
-  	$patent = $fc_row['citation_id'];
+  	$patent_id = $fc_row['citation_id'];
 	$cites = $fc_row['f_cites'];
 		
-	$update_q = "UPDATE $table SET future_cites = $cites WHERE patent_id = '$patent'";
-	$update = mysql_query($update_q, $dbh_local) or die(mysql_error());
-	//echo "$update_q<br>";
-}
+	//echo "Patent is $patent_id with cites $cites<br>";
+	
+	for ($i=1; $i<=$index; $i++) {
+		$test = $table_array[$i][patent_id];
+		//echo "Patent is $patent_id, does it match $test?<br>";
+		
+		if ($test == $patent_id) {
+			$table_array[$i][future_cites] = $cites;		
+		}
+	}
 
+} //Ends while loop
 
-//echo "Future cites entered into local DB successfully<br><br>";
+//echo "Future cites entered into table successfully<br><br>";
 //End future cites
 
 
 // -------------------------------------------------------------------
 // -------------------------------------------------------------------
 //Special section to temporarily correct for missing data in applications table
+$is_finfet = 1;
 if ($is_finfet == 1) {
 
-echo "Making correction for FinFET issues...<br><br>";
-
-$insert_q = "INSERT INTO $table VALUES($index, '2002-07-02','2000-10-23','6413802','4366555-1','CHENMING','Hu','The Regents of the University of California',554,1)";
-$update = mysql_query($insert_q, $dbh_local) or die(mysql_error());
-$index++;
-
-$insert_q = "INSERT INTO $table VALUES($index, '2002-07-02','2000-10-23','6413802','4366555-1','CHENMING','Hu','The Regents of the University of California',554,1)";
-$update = mysql_query($insert_q, $dbh_local) or die(mysql_error());
-$index++;
-
-$insert_q = "INSERT INTO $table VALUES($index, '2002-07-02','2000-10-23','6413802','6413802-2','JEFFREY','Bokor','The Regents of the University of California',554,1)";
-$update = mysql_query($insert_q, $dbh_local) or die(mysql_error());
-$index++;
-
-$insert_q = "INSERT INTO $table VALUES($index, '2002-07-02','2000-10-23','6413802','6413802-3','WEN CHIN','Lee','The Regents of the University of California',554,1)";
-$update = mysql_query($insert_q, $dbh_local) or die(mysql_error());
-$index++;
-
-$insert_q = "INSERT INTO $table VALUES($index, '2002-07-02','2000-10-23','6413802','6413802-4','NICK','Lindert','The Regents of the University of California',554,1)";
-$update = mysql_query($insert_q, $dbh_local) or die(mysql_error());
-$index++;
-							
-$insert_q = "INSERT INTO $table VALUES($index, '2002-07-02','2000-10-23','6413802','6413802-5','JAKUB TADEUSZ','Kedzierski','The Regents of the University of California',554,1)";
-$update = mysql_query($insert_q, $dbh_local) or die(mysql_error());
-$index++;
-							
-$insert_q = "INSERT INTO $table VALUES($index, '2002-07-02','2000-10-23','6413802','6413802-6','LELAND','Chang','The Regents of the University of California',554,1)";
-$update = mysql_query($insert_q, $dbh_local) or die(mysql_error());
-$index++;
-							
-$insert_q = "INSERT INTO $table VALUES($index, '2002-07-02','2000-10-23','6413802','6413802-7','XUEJUE','Huang','The Regents of the University of California',554,1)";
-$update = mysql_query($insert_q, $dbh_local) or die(mysql_error());
-$index++;
-							
-$insert_q = "INSERT INTO $table VALUES($index, '2002-07-02','2000-10-23','6413802','5783499-1','YANG KYU','Choi','The Regents of the University of California',554,1)";
-$update = mysql_query($insert_q, $dbh_local) or die(mysql_error());
-$index++;
-							
-$insert_q = "INSERT INTO $table VALUES($index, '2002-07-02','2000-10-23','6413802','6210988-1','TSU JAE','King','The Regents of the University of California',554,1)";
-$update = mysql_query($insert_q, $dbh_local) or die(mysql_error());
-$index++;
-							
-$insert_q = "INSERT INTO $table VALUES($index, '2002-07-02','2000-10-23','6413802','6034882-4','VIVEK','Subramanian','The Regents of the University of California',554,1)";
-$update = mysql_query($insert_q, $dbh_local) or die(mysql_error());
-
+	//echo "Making correction for temporary FinFET data issue...<br><br>";
+	$table_array = finfet_correction($table_array,$index);
+	
+	$final_ids[] = '4366555-1';
+	$final_ids[] = '6413802-2';
+	$final_ids[] = '6413802-3';
+	$final_ids[] = '6413802-4';
+	$final_ids[] = '6413802-5';
+	$final_ids[] = '6413802-6';
+	$final_ids[] = '6413802-7';
+	$final_ids[] = '5783499-1';
+	$final_ids[] = '6210988-1';
+	$final_ids[] = '6034882-4';
+		
 }
 // -------------------------------------------------------------------
 // -------------------------------------------------------------------
 //Go back and figure out if the inventors are university-affiliated
+//   Def.: If inventor has patented something assigned to a univ. (w/in time frame), is 'univ.-affiliated'
+//            If assignee includes $university_words, is a university.
+//   Plan: Find all patents (w/in time frame) by inventors, search for words in assignee, tag or not.
 
 $university_words = array("UNIVERSITY","REGENT","COLLEGE","SCHOOL");
 
-//First, get the inventor IDs to be tested
-//(Could just use data from above once FinFET correction no longer needed)
-$sql  = "SELECT DISTINCT inventor_id FROM $table ";
-	$result = mysql_query($sql, $dbh_local) or die(mysql_error());
-
-while($row = mysql_fetch_array($result)) {
-	$inv_ids[] = $row['inventor_id'];
-}
+//Need an array of all inventors. Happily, we have one already
+$inv_ids = make_unique($final_ids);
 $total_invs = count($inv_ids);
 
 //Grab all affiliations for all inventors (minimizing SQL requests)
@@ -450,17 +319,25 @@ echo "Final university   affailiated: $univ_count<br>";
 echo "Final private ind. affailiated: $priv_count<br><br>";
 // --------------------------
 //Now update the table to have a 1 in acad_if_one for those univ.-affiliated
+// for all in $univ_affiliated_ids (array)
 
-//Update the university
-$i = 0;
-$sql = "UPDATE $table SET acad_if_one='1' ";
-$sql .= " WHERE (inventor_id = '$univ_affiliated_ids[0]' ";
-for ($i=1; $i<$univ_count; $i++) {
-	$sql .= "OR inventor_id = '$univ_affiliated_ids[$i]' ";
-}
-$sql .= ")";
+//echo "Univ affiliated ids:"; print_r($univ_affiliated_ids);
 
-$result = mysql_query($sql, $dbh_local) or die(mysql_error());
+for ($i=1; $i<=$index; $i++) {
+		$inventor = $table_array[$i][inventor_id];
+//		echo "Inventor is $inventor, does it match $test?<br>";
+		
+		if (in_array($inventor,$univ_affiliated_ids)) {
+			$table_array[$i][acad_if_one] = 1;		
+		}
+	}
+
+
+foreach ($table_array as $key => $data) {
+   	if (in_array($data['inventor_id'],$univ_affiliated_ids)) { 
+	   $data['acad_if_one'] = 1;
+	} //Ends "if it's a match"
+  } //Ends "foreach" loop
 
 // -------------------------------------------------------------------
 // -------------------------------------------------------------------
@@ -480,9 +357,11 @@ echo "-------------------------------------------------------------------<br><br
 
 echo "Finished gathering data, moving on to formatting...<br><br>";
 
+//echo "<BR><BR><BR>NOW for the final table";
+//print_r($table_array);
 
 //Now to return a value to decide how big the rendered image will be
-return $count_inv;
+return $table_array;
 
 
 }
